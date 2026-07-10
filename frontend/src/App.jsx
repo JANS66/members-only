@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import SignUp from "./SignUp";
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -14,11 +15,13 @@ function App() {
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased p-8">
       <div className="max-w-3xl mx-auto">
         {/* Header */}
-        <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-4">
+        <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-4 text-center">
           The Exclusive Clubhouse
         </h1>
 
-        <hr className="border-slate-200 mb-8" />
+        <SignUp />
+
+        <hr className="border-slate-200 my-8" />
 
         {/* Feed COntainer */}
         <div className="space-y-4">

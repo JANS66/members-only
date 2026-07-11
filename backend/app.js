@@ -144,6 +144,43 @@ app.post(
   },
 );
 
+// --- JOIN THE CLUB / UPGRADE STATUS ROUTE ---
+app.post("/api/join", async (req, res) => {
+  const { username, passcode } = req.body;
+
+  if (!username || !passcode) {
+    return res
+      .status(400)
+      .json({ error: "Username and passcode are required." });
+  }
+
+  if (passcode !== process.env.SECRET_PASSCODE) {
+    return res.status(400).json({ error: "Incorrect passcode." });
+  }
+
+  try {
+    // Check if the user exists
+    const user = await prisma.user.findUnique({ where: { username } });
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    // Upgrade membershipStatus to true
+    const updatedUser = await prisma.user.update({
+      where: { username },
+      data: { membershipStatus: true },
+    });
+
+    res.json({
+      message: `Welcome to the inner circle, ${updatedUser.firstName}! Your membership is active.`,
+      membershipStatus: true,
+    });
+  } catch (error) {
+    console.error("Join club error:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
 // 2. Auth Status Check (React needs this to know if a user is logged in)
 app.get("/api/auth-status", (req, res) => {
   if (req.isAuthenticated()) {

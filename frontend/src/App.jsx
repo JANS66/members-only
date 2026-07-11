@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import SignUp from "./SignUp";
+import JoinClub from "./JoinClub";
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -20,6 +21,10 @@ function App() {
         </h1>
 
         <SignUp />
+
+        <hr className="border-slate-200 my-8" />
+
+        <JoinClub />
 
         <hr className="border-slate-200 my-8" />
 

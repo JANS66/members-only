@@ -7,6 +7,7 @@ const { PrismaPg } = require("@prisma/adapter-pg");
 const { Pool } = require("pg");
 const { body, validationResult } = require("express-validator");
 const bcrypt = require("bcryptjs");
+const LocalStrategy = require("passport-local").Strategy;
 
 require("dotenv").config();
 
@@ -26,17 +27,67 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Session Middleware configuration
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false },
+    cookie: {
+      maxAge: 1000 * 60 * 60 * 24, // Cookie expires in 1 day
+      secure: false, // Set to true when running over HTTPS in production
+      httpOnly: true, // Blocks client side JS from reading the cookie
+    },
   }),
 );
 
+// Initialize Passport and link it to the Session middleware
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Define the Local Strategy (How Passport verifies user credentials)
+passport.use(
+  new LocalStrategy(async (username, password, done) => {
+    try {
+      // Find the user in the database
+      const user = await prisma.user.findUnique({ where: { username } });
+
+      if (!user) {
+        return done(null, false, {
+          message: "Incorrect username or password.",
+        });
+      }
+
+      // Check if the hashed password matches
+      const match = await bcrypt.compare(password, user.password);
+      if (!match) {
+        return done(null, false, {
+          message: "Incorrect username or password.",
+        });
+      }
+
+      // Credentials are completely correct, pass user along to serialize step
+      return done(null, user);
+    } catch (err) {
+      return done(err);
+    }
+  }),
+);
+
+// Serialize User: Determines what user data to pack into the session cookie wrapper (just the ID)
+passport.serializeUser((user, done) => {
+  done(null, user.id);
+});
+
+// Deserialize User: On future requests, grabs the ID from the session cookie and finds the user details from DB
+passport.deserializeUser(async (id, done) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id } });
+    done(null, user); // Attaches full user object to req.user
+  } catch (err) {
+    done(err);
+  }
+});
 
 // --- API ROUTES ---
 
@@ -179,6 +230,39 @@ app.post("/api/join", async (req, res) => {
     console.error("Join club error:", error);
     res.status(500).json({ error: "Internal server error." });
   }
+});
+
+// --- LOGIN ROUTE ---
+app.post("/api/login", (req, res, next) => {
+  // Hand req over to the LocalStrategy
+  passport.authenticate("local", (err, user, info) => {
+    // Case A: The DB crashed or threw error
+    if (err) {
+      return res
+        .status(500)
+        .json({ message: "An internal server error occurred." });
+    }
+    // CASE B: LOcalStrategy returned 'false' (User want found or bcrypt password failed)
+    // 'info.message' holds the string text ("Incorrect username or password")
+    if (!user) {
+      // This maps to the custom verification error messages defined in the LocalStrategy
+      return res
+        .status(401)
+        .json({ message: info.message || "Invalid credentials." });
+    }
+
+    // Explicitly establish a session for this user
+    req.logIn(user, (err) => {
+      if (err) {
+        return res.status(500).json({ message: "Could not log in session." });
+      }
+
+      // Destructure 'password' away so it doesnt leak the hashed password string to the frontend
+      const { password, ...safeUser } = user;
+      // Return a clean JSON response to React frontend form
+      return res.json({ message: "Login successful", user: safeUser });
+    });
+  })(req, res, next); // Executes the passport engine instantly
 });
 
 // 2. Auth Status Check (React needs this to know if a user is logged in)

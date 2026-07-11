@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import SignUp from "./SignUp";
 import JoinClub from "./JoinClub";
+import Login from "./Login";
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -19,6 +20,10 @@ function App() {
         <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-4 text-center">
           The Exclusive Clubhouse
         </h1>
+
+        <Login />
+
+        <hr className="border-slate-200 my-8" />
 
         <SignUp />
 

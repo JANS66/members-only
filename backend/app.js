@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const session = require("express-session");
 const passport = require("passport");
@@ -5,19 +6,15 @@ const cors = require("cors");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { Pool } = require("pg");
-const { body, validationResult } = require("express-validator");
-const bcrypt = require("bcryptjs");
-const LocalStrategy = require("passport-local").Strategy;
 
-require("dotenv").config();
-
+// Database setup
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
-
 const prisma = new PrismaClient({ adapter });
+
 const app = express();
 
-// Middleware
+// Global Core Middleware
 app.use(
   cors({
     origin: "http://localhost:5173",
@@ -44,241 +41,11 @@ app.use(
 // Initialize Passport and link it to the Session middleware
 app.use(passport.initialize());
 app.use(passport.session());
+require("./config/passport")(prisma); // Registers strategies and passes prisma instance
 
-// Define the Local Strategy (How Passport verifies user credentials)
-passport.use(
-  new LocalStrategy(async (username, password, done) => {
-    try {
-      // Find the user in the database
-      const user = await prisma.user.findUnique({ where: { username } });
-
-      if (!user) {
-        return done(null, false, {
-          message: "Incorrect username or password.",
-        });
-      }
-
-      // Check if the hashed password matches
-      const match = await bcrypt.compare(password, user.password);
-      if (!match) {
-        return done(null, false, {
-          message: "Incorrect username or password.",
-        });
-      }
-
-      // Credentials are completely correct, pass user along to serialize step
-      return done(null, user);
-    } catch (err) {
-      return done(err);
-    }
-  }),
-);
-
-// Serialize User: Determines what user data to pack into the session cookie wrapper (just the ID)
-passport.serializeUser((user, done) => {
-  done(null, user.id);
-});
-
-// Deserialize User: On future requests, grabs the ID from the session cookie and finds the user details from DB
-passport.deserializeUser(async (id, done) => {
-  try {
-    const user = await prisma.user.findUnique({ where: { id } });
-    done(null, user); // Attaches full user object to req.user
-  } catch (err) {
-    done(err);
-  }
-});
-
-// --- API ROUTES ---
-
-// 1. Get Feed
-app.get("/api/messages", async (req, res) => {
-  try {
-    const messages = await prisma.message.findMany({
-      include: { author: true },
-      orderBy: { timestamp: "desc" },
-    });
-
-    // Check if the user is a logged in clubhouse member
-    const isMember = req.user && req.user.membershipStatus;
-
-    // Map through messages: if not a member, strip the author details
-    const processedMessages = messages.map((msg) => ({
-      id: msg.id,
-      title: msg.title,
-      text: msg.text,
-      timestamp: msg.timestamp,
-      author: isMember
-        ? `${msg.author.firstName} ${msg.author.lastName}`
-        : "Anonymous",
-    }));
-
-    res.json(processedMessages);
-  } catch (error) {
-    res.status(500).json({ error: "Error loading clubhouse feed" });
-  }
-});
-
-// --- SIGN UP / REGISTRATION ROUTE ---
-app.post(
-  "/api/register",
-  [
-    // 1. Sanitize and Validate inputs
-    body("firstName")
-      .trim()
-      .notEmpty()
-      .withMessage("First name is required.")
-      .escape(),
-    body("lastName")
-      .trim()
-      .notEmpty()
-      .withMessage("Last name is required.")
-      .escape(),
-    body("username")
-      .trim()
-      .notEmpty()
-      .withMessage("Username is required.")
-      .isAlphanumeric()
-      .withMessage("Username must be alphanumeric.")
-      .escape()
-      .custom(async (value) => {
-        // Check if username already exists in PostgreSQL
-        const user = await prisma.user.findUnique({
-          where: { username: value },
-        });
-        if (user) {
-          throw new Error("Username is already taken.");
-        }
-      }),
-    body("password")
-      .isLength({ min: 6 })
-      .withMessage("Password must be at least 6 characters long."),
-    body("confirmPassword").custom((value, { req }) => {
-      if (value !== req.body.password) {
-        throw new Error("Passwords do not match.");
-      }
-      return true;
-    }),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-
-    // If validations fail, return the array of errors to React
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    try {
-      // 2. Securely hash the password
-      const hashedPassword = await bcrypt.hash(req.body.password, 10);
-
-      // 3. Save User into the Database
-      const newUser = await prisma.user.create({
-        data: {
-          firstName: req.body.firstName,
-          lastName: req.body.lastName,
-          username: req.body.username,
-          password: hashedPassword,
-          membershipStatus: false, // Default to regular user until they join the club
-        },
-      });
-
-      res
-        .status(201)
-        .json({ message: "User registered successfully!", userId: newUser.id });
-    } catch (error) {
-      console.error("Registration error:", error);
-      res
-        .status(500)
-        .json({ error: "Internal server error during registration." });
-    }
-  },
-);
-
-// --- JOIN THE CLUB / UPGRADE STATUS ROUTE ---
-app.post("/api/join", async (req, res) => {
-  const { username, passcode } = req.body;
-
-  if (!username || !passcode) {
-    return res
-      .status(400)
-      .json({ error: "Username and passcode are required." });
-  }
-
-  if (passcode !== process.env.SECRET_PASSCODE) {
-    return res.status(400).json({ error: "Incorrect passcode." });
-  }
-
-  try {
-    // Check if the user exists
-    const user = await prisma.user.findUnique({ where: { username } });
-    if (!user) {
-      return res.status(404).json({ error: "User not found." });
-    }
-
-    // Upgrade membershipStatus to true
-    const updatedUser = await prisma.user.update({
-      where: { username },
-      data: { membershipStatus: true },
-    });
-
-    res.json({
-      message: `Welcome to the inner circle, ${updatedUser.firstName}! Your membership is active.`,
-      membershipStatus: true,
-    });
-  } catch (error) {
-    console.error("Join club error:", error);
-    res.status(500).json({ error: "Internal server error." });
-  }
-});
-
-// --- LOGIN ROUTE ---
-app.post("/api/login", (req, res, next) => {
-  // Hand req over to the LocalStrategy
-  passport.authenticate("local", (err, user, info) => {
-    // Case A: The DB crashed or threw error
-    if (err) {
-      return res
-        .status(500)
-        .json({ message: "An internal server error occurred." });
-    }
-    // CASE B: LOcalStrategy returned 'false' (User want found or bcrypt password failed)
-    // 'info.message' holds the string text ("Incorrect username or password")
-    if (!user) {
-      // This maps to the custom verification error messages defined in the LocalStrategy
-      return res
-        .status(401)
-        .json({ message: info.message || "Invalid credentials." });
-    }
-
-    // Explicitly establish a session for this user
-    req.logIn(user, (err) => {
-      if (err) {
-        return res.status(500).json({ message: "Could not log in session." });
-      }
-
-      // Destructure 'password' away so it doesnt leak the hashed password string to the frontend
-      const { password, ...safeUser } = user;
-      // Return a clean JSON response to React frontend form
-      return res.json({ message: "Login successful", user: safeUser });
-    });
-  })(req, res, next); // Executes the passport engine instantly
-});
-
-// 2. Auth Status Check (React needs this to know if a user is logged in)
-app.get("/api/auth-status", (req, res) => {
-  if (req.isAuthenticated()) {
-    res.json({
-      loggedIn: true,
-      user: {
-        username: req.user.username,
-        isMember: req.user.membershipStatus,
-      },
-    });
-  } else {
-    res.json({ loggedIn: false });
-  }
-});
+// Mount API Routes
+const apiRoutes = require("./routes/api")(prisma);
+app.use("/api", apiRoutes); // Automatically adds /api prefix to all sub routes
 
 // Start server
 const PORT = process.env.PORT || 3000;

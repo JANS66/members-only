@@ -3,8 +3,147 @@ const router = express.Router();
 const passport = require("passport");
 const { body, validationResult } = require("express-validator");
 const bcrypt = require("bcryptjs");
+const { isLoggedIn } = require("../middleware/auth");
 
 module.exports = function (prisma) {
+  // ==========================================
+  // 1. POST /messages (Secure + Sanitized)
+  // ==========================================
+  router.post(
+    "/messages",
+    isLoggedIn,
+    [
+      body("title")
+        .trim()
+        .isLength({ min: 1, max: 100 })
+        .withMessage("Title must be between 1 and 100 characters."),
+      body("text")
+        .trim()
+        .isLength({ min: 1, max: 1000 })
+        .withMessage("Message must be between 1 and 1000 characters."),
+    ],
+    async (req, res) => {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+
+      try {
+        const { title, text } = req.body;
+
+        // Save to database using Prisma
+        // COnnect the message directly to the user ID stored in the session
+        const newMessage = await prisma.message.create({
+          data: {
+            title,
+            text,
+            userId: req.user.id, // Passport injected this safely from the session
+          },
+        });
+
+        res
+          .status(201)
+          .json({ message: "Message posted successfully!", data: newMessage });
+      } catch (error) {
+        console.error("Prisma error:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to save message to database." });
+      }
+    },
+  );
+
+  // ==========================================
+  // 2. POST /join (Validates Secret Code)
+  // ==========================================
+  router.post(
+    "/join",
+    isLoggedIn,
+    [body("passcode").trim().notEmpty().withMessage("Passcode is required.")],
+    async (req, res) => {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+
+      try {
+        const { passcode } = req.body;
+
+        if (passcode !== process.env.SECRET_PASSCODE) {
+          return res
+            .status(400)
+            .json({ message: "Incorrect secret passcode!" });
+        }
+
+        // Upgrade membershipStatus to true
+        const updatedUser = await prisma.user.update({
+          where: { id: req.user.id },
+          data: { membershipStatus: true },
+        });
+
+        res.json({
+          message: `Welcome to the inner circle, ${updatedUser.firstName}! Your membership is active.`,
+        });
+      } catch (error) {
+        console.error("Join club error:", error);
+        res.status(500).json({ error: "Failed to upgrade membership status." });
+      }
+    },
+  );
+
+  // ==========================================
+  // 3. POST /login (No Sanitization needed, lookup only)
+  // ==========================================
+  router.post("/login", (req, res, next) => {
+    // Hand req over to the LocalStrategy
+    passport.authenticate("local", (err, user, info) => {
+      // Case A: The DB crashed or threw error
+      if (err) {
+        return res
+          .status(500)
+          .json({ message: "An internal server error occurred." });
+      }
+      // CASE B: LOcalStrategy returned 'false' (User want found or bcrypt password failed)
+      // 'info.message' holds the string text ("Incorrect username or password")
+      if (!user) {
+        // This maps to the custom verification error messages defined in the LocalStrategy
+        return res
+          .status(401)
+          .json({ message: info.message || "Invalid credentials." });
+      }
+
+      // Explicitly establish a session for this user
+      req.logIn(user, (err) => {
+        if (err) {
+          return res.status(500).json({ message: "Could not log in session." });
+        }
+
+        // Destructure 'password' away so it doesnt leak the hashed password string to the frontend
+        const { password, ...safeUser } = user;
+        // Return a clean JSON response to React frontend form
+        return res.json({ message: "Login successful", user: safeUser });
+      });
+    })(req, res, next); // Executes the passport engine instantly
+  });
+
+  // ==========================================
+  // 4. GET /auth-status
+  // ==========================================
+  router.get("/auth-status", (req, res) => {
+    // Passport provides req.isAuthenticated() automatically based on the session cookie
+    if (req.isAuthenticated()) {
+      res.json({
+        authenticated: true,
+        user: {
+          id: req.user.id,
+          username: req.user.username,
+          isMember: req.user.membershipStatus,
+        },
+      });
+    }
+    return res.json({ authenticated: false, user: null });
+  });
+
   // --- GET MESSAGES ---
   router.get("/messages", async (req, res) => {
     try {
@@ -21,7 +160,7 @@ module.exports = function (prisma) {
         id: msg.id,
         title: msg.title,
         text: msg.text,
-        timestamp: msg.timestamp,
+        timestamp: isMember ? msg.timestamp : null,
         author: isMember
           ? `${msg.author.firstName} ${msg.author.lastName}`
           : "Anonymous",
@@ -109,91 +248,6 @@ module.exports = function (prisma) {
       }
     },
   );
-
-  // --- JOIN CLUB ---
-  router.post("/join", async (req, res) => {
-    const { username, passcode } = req.body;
-
-    if (!username || !passcode) {
-      return res
-        .status(400)
-        .json({ error: "Username and passcode are required." });
-    }
-
-    if (passcode !== process.env.SECRET_PASSCODE) {
-      return res.status(400).json({ error: "Incorrect passcode." });
-    }
-
-    try {
-      // Check if the user exists
-      const user = await prisma.user.findUnique({ where: { username } });
-      if (!user) {
-        return res.status(404).json({ error: "User not found." });
-      }
-
-      // Upgrade membershipStatus to true
-      const updatedUser = await prisma.user.update({
-        where: { username },
-        data: { membershipStatus: true },
-      });
-
-      res.json({
-        message: `Welcome to the inner circle, ${updatedUser.firstName}! Your membership is active.`,
-        membershipStatus: true,
-      });
-    } catch (error) {
-      console.error("Join club error:", error);
-      res.status(500).json({ error: "Internal server error." });
-    }
-  });
-
-  // --- LOGIN ---
-  router.post("/login", (req, res, next) => {
-    // Hand req over to the LocalStrategy
-    passport.authenticate("local", (err, user, info) => {
-      // Case A: The DB crashed or threw error
-      if (err) {
-        return res
-          .status(500)
-          .json({ message: "An internal server error occurred." });
-      }
-      // CASE B: LOcalStrategy returned 'false' (User want found or bcrypt password failed)
-      // 'info.message' holds the string text ("Incorrect username or password")
-      if (!user) {
-        // This maps to the custom verification error messages defined in the LocalStrategy
-        return res
-          .status(401)
-          .json({ message: info.message || "Invalid credentials." });
-      }
-
-      // Explicitly establish a session for this user
-      req.logIn(user, (err) => {
-        if (err) {
-          return res.status(500).json({ message: "Could not log in session." });
-        }
-
-        // Destructure 'password' away so it doesnt leak the hashed password string to the frontend
-        const { password, ...safeUser } = user;
-        // Return a clean JSON response to React frontend form
-        return res.json({ message: "Login successful", user: safeUser });
-      });
-    })(req, res, next); // Executes the passport engine instantly
-  });
-
-  // --- AUTH STATUS ---
-  router.get("/auth-status", (req, res) => {
-    if (req.isAuthenticated()) {
-      res.json({
-        loggedIn: true,
-        user: {
-          username: req.user.username,
-          isMember: req.user.membershipStatus,
-        },
-      });
-    } else {
-      res.json({ loggedIn: false });
-    }
-  });
 
   return router;
 };

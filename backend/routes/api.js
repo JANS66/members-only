@@ -54,6 +54,35 @@ module.exports = function (prisma) {
   );
 
   // ==========================================
+  // DELETE /messages/:id (Admin Exclusive)
+  // ==========================================
+  router.delete("/messages/:id", isLoggedIn, async (req, res) => {
+    // Block non admins immediately
+    if (!req.user.isAdmin) {
+      return res
+        .status(403)
+        .json({ message: "Forbidden: Admin privileges required." });
+    }
+
+    try {
+      const messageId = parseInt(req.params.id);
+
+      await prisma.message.delete({
+        where: { id: messageId },
+      });
+
+      res.json({
+        message: "Message successfully deleted by administrative action.",
+      });
+    } catch (error) {
+      console.error("Delete error:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to delete message from database." });
+    }
+  });
+
+  // ==========================================
   // 2. POST /join (Validates Secret Code)
   // ==========================================
   router.post(
@@ -118,10 +147,14 @@ module.exports = function (prisma) {
           return res.status(500).json({ message: "Could not log in session." });
         }
 
-        // Destructure 'password' away so it doesnt leak the hashed password string to the frontend
-        const { password, ...safeUser } = user;
-        // Return a clean JSON response to React frontend form
-        return res.json({ message: "Login successful", user: safeUser });
+        return res.json({
+          message: "Login successful",
+          user: {
+            id: user.id,
+            username: user.username,
+            isAdmin: user.isAdmin,
+          },
+        });
       });
     })(req, res, next); // Executes the passport engine instantly
   });
@@ -132,12 +165,12 @@ module.exports = function (prisma) {
   router.get("/auth-status", (req, res) => {
     // Passport provides req.isAuthenticated() automatically based on the session cookie
     if (req.isAuthenticated()) {
-      res.json({
+      return res.json({
         authenticated: true,
         user: {
           id: req.user.id,
           username: req.user.username,
-          isMember: req.user.membershipStatus,
+          isAdmin: req.user.isAdmin,
         },
       });
     }

@@ -1,7 +1,6 @@
 import { useState } from "react";
 
-function JoinClub() {
-  const [username, setUsername] = useState("");
+function JoinClub({ setUser }) {
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -15,7 +14,8 @@ function JoinClub() {
       const response = await fetch("http://localhost:3000/api/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, passcode }),
+        credentials: "include",
+        body: JSON.stringify({ passcode }),
       });
 
       const data = await response.json();
@@ -25,6 +25,11 @@ function JoinClub() {
       } else {
         setSuccess(data.message);
         setPasscode("");
+
+        setUser((prevUser) => ({
+          ...prevUser,
+          isMember: true,
+        }));
       }
     } catch (err) {
       setError("Unable to reach the backend server.");
@@ -55,20 +60,6 @@ function JoinClub() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
-            Confirm Username
-          </label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-slate-500"
-            placeholder="e.g. spider161"
-            required
-          />
-        </div>
-
         <div>
           <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
             Secret Passcode

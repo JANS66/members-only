@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-function Login() {
+export default function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -30,8 +30,8 @@ function Login() {
         setUsername("");
         setPassword("");
 
-        // TODO custom event or state redirect
-        console.log("Logged in user data:", data.user);
+        // Pass the returned user payload straight back up to App.jsx
+        onLoginSuccess(data.user);
       }
     } catch (err) {
       setError("Cannot connect to the authentication server.");
@@ -100,5 +100,3 @@ function Login() {
     </div>
   );
 }
-
-export default Login;

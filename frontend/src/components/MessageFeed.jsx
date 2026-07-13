@@ -14,7 +14,7 @@ export default function MessageFeed({ messages, user, onDelete }) {
             {/* Admin Delete Button Container */}
             {user?.isAdmin && (
               <button
-                onClick={() => handleDelete(msg.id)}
+                onClick={() => onDelete(msg.id)}
                 className="absolute top-4 right-4 text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1 rounded-md transition-colors cursor-pointer"
               >
                 Delete

@@ -15,7 +15,9 @@ export default function App() {
   // 1. Fetch Auth Session on Mount
   useEffect(() => {
     // Ask backend if this browser currently holds a valid session cookie
-    fetch("http://localhost:3000/api/auth-status", { credentials: "include" })
+    fetch(`${import.meta.env.VITE_API_URL}/api/auth-status`, {
+      credentials: "include",
+    })
       .then((res) => res.json())
       .then((data) => {
         if (data.authenticated) {
@@ -28,7 +30,7 @@ export default function App() {
 
   // 2. Fetch Messages
   const fetchMessages = () => {
-    fetch("http://localhost:3000/api/messages", {
+    fetch(`${import.meta.env.VITE_API_URL}/api/messages`, {
       credentials: "include",
     })
       .then((res) => res.json())
@@ -52,7 +54,7 @@ export default function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:3000/api/messages/${messageId}`,
+        `${import.meta.env.VITE_API_URL}/api/messages/${messageId}`,
         {
           method: "DELETE",
           credentials: "include",

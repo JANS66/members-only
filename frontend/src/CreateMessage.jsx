@@ -13,12 +13,15 @@ export default function CreateMessage({ user, onMessagePosted }) {
     setError("");
 
     try {
-      const response = await fetch("http://localhost:3000/api/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // Critical line so the connect.sid cookie passes through
-        body: JSON.stringify({ title, text }),
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include", // Critical line so the connect.sid cookie passes through
+          body: JSON.stringify({ title, text }),
+        },
+      );
 
       const data = await response.json();
 

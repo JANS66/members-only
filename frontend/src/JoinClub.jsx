@@ -11,7 +11,7 @@ function JoinClub({ setUser }) {
     setSuccess("");
 
     try {
-      const response = await fetch("http://localhost:3000/api/join", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

@@ -30,10 +30,12 @@ app.use(
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    proxy: true, // Tells Express to trust Renders HTTPS redirector
     cookie: {
       maxAge: 1000 * 60 * 60 * 24, // Cookie expires in 1 day
-      secure: false, // Set to true when running over HTTPS in production
+      secure: true, // Set to true when running over HTTPS in production
       httpOnly: true, // Blocks client side JS from reading the cookie
+      sameSite: "none", // Essential for cross domain cookies
     },
   }),
 );
